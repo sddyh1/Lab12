@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using PhoneBookDI.Models;
 using PhoneBookDI.Services;
 using PhoneBookDI.ViewModels;
-using System;
 using System.Windows;
 
 namespace PhoneBookDI
@@ -22,12 +21,15 @@ namespace PhoneBookDI
                 options.UseSqlite("Data Source=PhoneBookDB_Evseev_2307a.db"));
 
             services.AddSingleton<IDialogService, DialogService>();
-            services.AddTransient<MainViewModel>();
+            services.AddTransient<ContactEditViewModel>();
+            services.AddSingleton<ContactsListViewModel>();
+
+            services.AddSingleton<Func<ContactEditViewModel>>(provider => () => provider.GetRequiredService<ContactEditViewModel>());
 
             services.AddSingleton<MainWindow>(provider =>
             {
                 var window = new MainWindow();
-                window.DataContext = provider.GetRequiredService<MainViewModel>();
+                window.DataContext = provider.GetRequiredService<ContactsListViewModel>();
                 return window;
             });
 
