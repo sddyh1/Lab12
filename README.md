@@ -1,5 +1,5 @@
-# Лабораторная работа №12
-## Взаимодействие с базами данных в .NET. ADO.NET vs ORM. Обратная инженерия
+# Лабораторная работа №13
+## Реализация CRUD-операций с использованием Entity Framework Core
 
 **Выполнил:** Евсеев В. А.  
 **Группа:** 2307А1  
@@ -10,206 +10,280 @@
 
 ## Формулировка задания
 
-**Тема:** Взаимодействие с базами данных в .NET. ADO.NET vs ORM. Обратная инженерия.  
+**Тема:** Взаимодействие с базами данных в .NET. CRUD операции.  
 
-**Цель работы:** изучить основные подходы к взаимодействию с базами данных в приложениях .NET, сравнить низкоуровневый подход ADO.NET с высокоуровневыми ORM-решениями. Освоить подход Database First (обратная инженерия) с использованием Entity Framework Core для генерации модели данных на основе готовой базы данных.
+**Цель работы:** изучить внутреннее устройство класса `DbContext` в Entity Framework Core, механизмы отслеживания изменений сущностей (Change Tracker). Реализовать полный цикл CRUD-операций (Create, Read, Update, Delete) в приложении «Телефонная книга», работая с базой данных напрямую через контекст.
 
 **Задание:**  
-Выполнить интеграцию базы данных в существующее приложение «Телефонная книга» (из лабораторной работы №10-11).
+Модернизировать приложение «Телефонная книга» (из лабораторной работы №12) для полноценной работы с базой данных.
 
 Требования к доработке:
-1. Подключить к проекту необходимые NuGet-пакеты для работы с Entity Framework Core и выбранной СУБД (SQLite).
-2. Создать новую базу данных в выбранной СУБД с именем `PhoneBookDB_ФАМИЛИЯ_ГРУППА` (в работе - `PhoneBookDB_Evseev_2307a`).
-3. Используя средства обратной инженерии (Scaffolding), восстановить классы сущностей и контекст данных по готовой базе данных.
-4. Зарегистрировать `DbContext` в контейнере внедрения зависимостей (DI).
-5. Обеспечить чтение списка контактов из базы данных при запуске приложения.
+1. Изучить структуру сгенерированного в предыдущей работе класса `ApplicationContext`.
+2. Внедрить `ApplicationContext` в конструкторы ViewModels (`ContactsListViewModel`, `ContactEditViewModel`).
+3. Реализовать логику добавления нового контакта через отдельную форму.
+4. Реализовать сохранение изменений при редактировании контакта.
+5. Реализовать удаление выбранного контакта из списка.
+6. Обеспечить обновление интерфейса после каждой операции с БД.
 
 ---
 
 ## Теоретическое обоснование
 
-### ADO.NET и ORM
-- **ADO.NET** - низкоуровневый интерфейс доступа к данным, требующий ручного написания SQL-запросов и маппинга. Обеспечивает максимальную производительность, но увеличивает объём шаблонного кода.
-- **ORM (Object-Relational Mapping)** - высокоуровневая абстракция, позволяющая работать с базой данных через объекты C#. Entity Framework Core автоматически генерирует SQL, упрощает разработку и сопровождение.
+### Класс DbContext и его роль
+`DbContext` является центральным классом EF Core, отвечающим за:
+- Управление соединением с базой данных.
+- Маппинг объектов C# на таблицы БД.
+- Отслеживание изменений (Change Tracker).
 
-### Подход Database First (Обратная инженерия)
-При наличии готовой базы данных EF Core может сгенерировать классы сущностей и контекст данных. Это избавляет от ручного написания моделей и снижает риск ошибок при изменении схемы БД.
+### Жизненный цикл сущностей и Change Tracker
+EF Core отслеживает состояние каждой сущности, загруженной через контекст. Состояния:
+- `Added` – новая запись (будет выполнена операция INSERT).
+- `Modified` – изменённая запись (будет выполнен UPDATE).
+- `Deleted` – удалённая запись (будет выполнен DELETE).
+- `Unchanged` – без изменений.
 
-### DI и DbContext
-Регистрация `DbContext` в DI-контейнере с временем жизни `Scoped` (или `Singleton` для SQLite) позволяет внедрять контекст в ViewModel и другие сервисы, обеспечивая централизованное управление подключением к БД.
+При вызове `SaveChanges()` Change Tracker анализирует все отслеживаемые объекты и генерирует соответствующие SQL-команды.
+
+### Реализация CRUD-операций в EF Core
+- **Create**: `_context.Contacts.Add(newContact); _context.SaveChanges();`
+- **Read**: `_context.Contacts.ToList();` или `Load()` с локальной коллекцией.
+- **Update**: изменение свойств отслеживаемого объекта, затем `SaveChanges()`.
+- **Delete**: `_context.Contacts.Remove(contact); _context.SaveChanges();`
+
+### Подход Database First
+В лабораторной работе №12 была выполнена обратная инженерия (Scaffolding) готовой базы данных, сгенерированы классы `Contact` и `PhoneBookDbEvseev2307aContext`. В данной работе этот контекст используется напрямую через внедрение зависимостей.
 
 ---
 
 ## Описание выполненных действий
 
-### 1. Установка NuGet-пакетов
-Добавлены пакеты:
-- `Microsoft.EntityFrameworkCore.Sqlite` - провайдер для SQLite.
-- `Microsoft.EntityFrameworkCore.Design` - инструменты для Scaffolding.
-- `Microsoft.EntityFrameworkCore.Tools` (опционально, для команд PMC).
+### 1. Анализ сгенерированного класса DbContext
+Файл `PhoneBookDbEvseev2307aContext.cs` содержит:
+- Конструктор с параметром `DbContextOptions<...>`, что позволяет передавать параметры подключения из DI.
+- Свойство `DbSet<Contact> Contacts`.
+- Метод `OnModelCreating` для Fluent API (заполняется автоматически при scaffolding).
 
-Установка выполнена через `dotnet add package` и Package Manager Console.
+Было принято решение удалить метод `OnConfiguring`, чтобы избежать конфликта строк подключения и полностью положиться на DI.
 
-### 2. Создание базы данных SQLite
-С помощью **DB Browser for SQLite** создан файл `PhoneBookDB_Evseev_2307a.db` со следующей структурой:
+### 2. Реорганизация ViewModels
+Созданы две ViewModel:
+- **ContactsListViewModel** – отвечает за отображение списка контактов и команды (Add, Edit, Delete).
+- **ContactEditViewModel** – отвечает за форму добавления/редактирования одного контакта.
 
-```sql
-CREATE TABLE Contacts (
-    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    Name TEXT NOT NULL,
-    Phone TEXT NOT NULL
-);
+### 3. Реализация операции чтения (Read)
+В `ContactsListViewModel` в конструкторе загружаются все контакты:
+```csharp
+_context.Contacts.Load();
+Contacts = _context.Contacts.Local.ToObservableCollection();
+После каждой операции (добавление, обновление, удаление) список перезагружается методом LoadContacts().
 
-INSERT INTO Contacts (Name, Phone) VALUES
-('Иванов Иван', '+79991234567'),
-('Петрова Мария', '+79997654321'),
-('Сидоров Алексей', '+79995558899');
-Файл помещён в корень проекта.
+4. Реализация операции создания (Create)
+При нажатии кнопки «Добавить» создаётся экземпляр ContactEditViewModel, вызывается метод InitializeForAdd() и открывается окно ContactEditWindow. Пользователь заполняет имя и телефон, нажимает «Сохранить». В методе Save() выполняется проверка на дубликат по номеру телефона, создаётся новый объект Contact, добавляется в DbSet и вызывается _context.SaveChanges().
 
-3. Обратная инженерия (Scaffolding)
-Выполнена команда .NET CLI (предварительно установлен глобальный инструмент dotnet-ef):
+5. Реализация операции редактирования (Update)
+При выборе контакта в списке и нажатии «Редактировать» создаётся ContactEditViewModel, вызывается InitializeForEdit(selectedContact), открывается окно с предзаполненными полями. После изменения данных и нажатия «Сохранить» изменяются свойства существующего объекта _currentContact (который уже отслеживается контекстом) и вызывается SaveChanges(). Благодаря Change Tracker EF Core автоматически формирует SQL-запрос UPDATE.
 
-bash
-dotnet ef dbcontext scaffold "Data Source=PhoneBookDB_Evseev_2307a.db" Microsoft.EntityFrameworkCore.Sqlite --output-dir Models --force
-Результат: в папке Models сгенерированы файлы:
+6. Реализация операции удаления (Delete)
+В ContactsListViewModel команда DeleteCommand вызывает метод DeleteContact(), который запрашивает подтверждение, затем удаляет выбранный контакт из DbSet и сохраняет изменения.
 
-PhoneBookDbEvseev2307aContext.cs - контекст базы данных.
+7. Обновление интерфейса после операций
+После успешного сохранения в ContactEditViewModel вызывается событие RequestClose, которое закрывает окно с DialogResult = true. В ContactsListViewModel метод OpenEditWindow ожидает этот результат и перезагружает список через LoadContacts(). При этом используется _context.ChangeTracker.Clear() и повторная загрузка из БД, чтобы гарантировать актуальность данных.
 
-Contact.cs - класс сущности (свойства Id, Name, Phone).
+8. Регистрация сервисов в DI-контейнере
+В App.xaml.cs добавлены:
 
-4. Регистрация DbContext в DI-контейнере
-В App.xaml.cs добавлена регистрация контекста с указанием строки подключения:
+PhoneBookDbEvseev2307aContext – зарегистрирован с использованием SQLite.
 
-csharp
-services.AddDbContext<PhoneBookDbEvseev2307aContext>(options =>
-    options.UseSqlite("Data Source=PhoneBookDB_Evseev_2307a.db"));
-5. Модификация ViewModel (MainViewModel)
-В конструктор добавлен параметр PhoneBookDbEvseev2307aContext context (внедрение через DI).
+IDialogService и DialogService.
 
-Загрузка контактов реализована через _context.Contacts.Load() и присвоение Contacts = _context.Contacts.Local.ToObservableCollection().
+ContactEditViewModel как Transient (новый экземпляр для каждого окна).
 
-Метод AddContact:
+ContactsListViewModel как Singleton.
 
-Проверяет дубликат через _context.Contacts.Any(...).
+Фабрика Func<ContactEditViewModel> для создания ViewModel через DI.
 
-Добавляет новый объект Contact в DbSet и вызывает _context.SaveChanges().
+9. Создание окна редактирования
+Добавлено окно ContactEditWindow с двумя TextBox и кнопками «Сохранить» / «Отмена». DataContext привязывается к ContactEditViewModel. Команды SaveCommand и CancelCommand управляют логикой.
 
-Метод DeleteContact:
+10. Обработка ошибок
+Все вызовы SaveChanges() обёрнуты в try-catch с выводом сообщений через IDialogService. При ошибках пользователь получает информативное диалоговое окно.
 
-Удаляет контакт из DbSet и сохраняет изменения.
+11. Тестирование
+При запуске отображаются все контакты из БД.
 
-Все диалоговые окна (успех, ошибка, подтверждение) остались через IDialogService, реализованный в ЛР№10.
+Добавление нового контакта через отдельную форму: после сохранения контакт появляется в таблице.
 
-6. Настройка копирования файла базы данных
-Для автоматической доставки .db в выходную папку в свойствах файла установлено «Копировать в выходной каталог: Копировать, если новее».
+Редактирование: изменение данных контакта, после сохранения таблица обновляется без перезапуска.
 
-7. Тестирование
-При запуске приложения в DataGrid отображаются три тестовых контакта.
+Удаление: запрос подтверждения, контакт удаляется из БД и таблицы.
 
-Добавление нового контакта приводит к его сохранению в БД (проверено перезапуском).
+Валидация: проверка на пустое имя и формат телефона (+7XXXXXXXXXX или 10 цифр), кнопка «Сохранить» активна только при корректных данных.
 
-Удаление контакта также сохраняется в БД.
-
-При попытке добавить дубликат по номеру телефона выводится предупреждение.
-
-Валидация полей (имя не пустое, телефон в формате +7... или 10 цифр) работает через CanAddContact.
+Защита от дубликатов: при добавлении контакта с уже существующим номером выводится предупреждение.
 
 Результат выполненной работы
-Скриншоты (описательно)
-Окно приложения при запуске: отображаются три контакта из БД.
+Скриншоты (описательно):
 
-Добавление нового контакта: после нажатия «Добавить» контакт появляется в таблице, появляется информационное сообщение.
+Главное окно – список контактов, три кнопки (Добавить, Редактировать, Удалить).
 
-Удаление: запрос подтверждения, после удаления контакт исчезает.
+Окно добавления – пустые поля, после ввода и сохранения – контакт появляется в списке.
 
-Сравнение с теоретической оценкой
-Использование ORM (EF Core) позволило отказаться от ручного написания SQL и маппинга, сосредоточившись на объектной модели.
+Окно редактирования – поля предзаполнены данными выбранного контакта, после изменения и сохранения – запись обновляется.
 
-Database First ускорил разработку: модель данных сгенерирована автоматически из существующей БД.
+Сравнение с теоретической оценкой:
 
-DI обеспечил слабую связанность: MainViewModel не создаёт контекст самостоятельно, а получает его через конструктор. Это упрощает тестирование и замену провайдера БД.
+Использование EF Core позволило реализовать CRUD-операции без ручного написания SQL, благодаря Change Tracker все изменения автоматически преобразуются в соответствующие команды базы данных.
 
-SQLite выбран как встраиваемая СУБД, не требующая установки сервера и сложной настройки.
+Разделение ViewModel и использование DI обеспечило слабую связанность и упростило тестирование.
+
+Отдельная форма редактирования соответствует принципу единой ответственности и улучшает UX.
 
 Исходный код модуля (ключевые фрагменты)
-Models/PhoneBookDbEvseev2307aContext.cs (сгенерирован, с добавленным DbSet<Contact>)
+ViewModels/ContactsListViewModel.cs
 csharp
-using Microsoft.EntityFrameworkCore;
-using PhoneBookDI.Models;
-
-namespace PhoneBookDI.Models
+public class ContactsListViewModel : ObservableObject
 {
-    public partial class PhoneBookDbEvseev2307aContext : DbContext
+    private readonly PhoneBookDbEvseev2307aContext _context;
+    private readonly IDialogService _dialogService;
+    private readonly Func<ContactEditViewModel> _editViewModelFactory;
+
+    private ObservableCollection<Contact> _contacts = null!;
+    public ObservableCollection<Contact> Contacts { get; set; }
+    public Contact? SelectedContact { get; set; }
+
+    public ICommand AddCommand { get; }
+    public ICommand EditCommand { get; }
+    public ICommand DeleteCommand { get; }
+
+    public ContactsListViewModel(PhoneBookDbEvseev2307aContext context, IDialogService dialogService, Func<ContactEditViewModel> editViewModelFactory)
     {
-        public PhoneBookDbEvseev2307aContext(DbContextOptions<PhoneBookDbEvseev2307aContext> options)
-            : base(options)
+        _context = context;
+        _dialogService = dialogService;
+        _editViewModelFactory = editViewModelFactory;
+        LoadContacts();
+        AddCommand = new RelayCommand(OpenAddContact);
+        EditCommand = new RelayCommand(OpenEditContact, () => SelectedContact != null);
+        DeleteCommand = new RelayCommand(DeleteContact, () => SelectedContact != null);
+    }
+
+    private void LoadContacts()
+    {
+        _context.ChangeTracker.Clear();
+        var freshContacts = _context.Contacts.ToList();
+        Contacts = new ObservableCollection<Contact>(freshContacts);
+    }
+
+    private void OpenAddContact()
+    {
+        var editVm = _editViewModelFactory();
+        editVm.InitializeForAdd();
+        OpenEditWindow(editVm);
+    }
+
+    private void OpenEditContact()
+    {
+        if (SelectedContact == null) return;
+        var editVm = _editViewModelFactory();
+        editVm.InitializeForEdit(SelectedContact);
+        OpenEditWindow(editVm);
+    }
+
+    private void OpenEditWindow(ContactEditViewModel vm)
+    {
+        var window = new ContactEditWindow { DataContext = vm };
+        vm.RequestClose += (s, e) => { window.DialogResult = true; window.Close(); };
+        if (window.ShowDialog() == true)
+            LoadContacts();
+    }
+
+    private void DeleteContact()
+    {
+        if (SelectedContact == null) return;
+        if (_dialogService.ShowConfirmation($"Удалить контакт \"{SelectedContact.Name}\"?", "Удаление"))
         {
+            _context.Contacts.Remove(SelectedContact);
+            _context.SaveChanges();
+            LoadContacts();
+            _dialogService.ShowInfo("Контакт удалён.", "Успех");
         }
-
-        public DbSet<Contact> Contacts { get; set; }
-
-        // ... остальной код (OnConfiguring, OnModelCreating)
     }
 }
-ViewModels/MainViewModel.cs (фрагмент с работой с БД)
+ViewModels/ContactEditViewModel.cs
 csharp
-private readonly IDialogService _dialogService;
-private readonly PhoneBookDbEvseev2307aContext _context;
-
-public MainViewModel(IDialogService dialogService, PhoneBookDbEvseev2307aContext context)
+public class ContactEditViewModel : ObservableObject
 {
-    _dialogService = dialogService;
-    _context = context;
+    private readonly PhoneBookDbEvseev2307aContext _context;
+    private readonly IDialogService _dialogService;
+    private Contact? _currentContact;
+    private bool _isEditMode;
 
-    _context.Contacts.Load();
-    Contacts = _context.Contacts.Local.ToObservableCollection();
+    public string Name { get; set; } = string.Empty;
+    public string Phone { get; set; } = string.Empty;
 
-    AddCommand = new RelayCommand(AddContact, CanAddContact);
-    DeleteCommand = new RelayCommand<Contact>(DeleteContact, c => c != null);
+    public ICommand SaveCommand { get; }
+    public ICommand CancelCommand { get; }
+    public event EventHandler? RequestClose;
+
+    public ContactEditViewModel(PhoneBookDbEvseev2307aContext context, IDialogService dialogService)
+    {
+        _context = context;
+        _dialogService = dialogService;
+        SaveCommand = new RelayCommand(Save, CanSave);
+        CancelCommand = new RelayCommand(() => RequestClose?.Invoke(this, EventArgs.Empty));
+    }
+
+    public void InitializeForAdd() { _isEditMode = false; _currentContact = null; Name = Phone = string.Empty; }
+    public void InitializeForEdit(Contact contact) { _isEditMode = true; _currentContact = contact; Name = contact.Name; Phone = contact.Phone; }
+
+    private bool CanSave() => !string.IsNullOrWhiteSpace(Name) && Regex.IsMatch(Phone, @"^(\+7\d{10}|\d{10})$");
+
+    private void Save()
+    {
+        try
+        {
+            if (_isEditMode && _currentContact != null)
+            {
+                _currentContact.Name = Name;
+                _currentContact.Phone = Phone;
+                _context.SaveChanges();
+                _dialogService.ShowInfo("Контакт обновлён.", "Успех");
+            }
+            else
+            {
+                if (_context.Contacts.Any(c => c.Phone == Phone)) { _dialogService.ShowWarning("Контакт с таким номером уже существует!", "Дубликат"); return; }
+                _context.Contacts.Add(new Contact { Name = Name, Phone = Phone });
+                _context.SaveChanges();
+                _dialogService.ShowInfo("Контакт добавлен.", "Успех");
+            }
+            RequestClose?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex) { _dialogService.ShowError($"Ошибка сохранения: {ex.Message}", "Ошибка"); }
+    }
 }
-
-private void AddContact()
-{
-    if (_context.Contacts.Any(c => c.Phone == Phone))
-    {
-        _dialogService.ShowWarning("Контакт с таким номером телефона уже существует!", "Дубликат");
-        return;
-    }
-
-    try
-    {
-        var newContact = new Contact { Name = Name, Phone = Phone };
-        _context.Contacts.Add(newContact);
-        _context.SaveChanges();
-        Name = string.Empty;
-        Phone = string.Empty;
-        _dialogService.ShowInfo("Контакт успешно добавлен.", "Успех");
-    }
-    catch (Exception ex)
-    {
-        _dialogService.ShowError($"Ошибка при добавлении: {ex.Message}", "Ошибка");
-    }
-}
-
-private void DeleteContact(Contact? contact)
-{
-    if (contact == null) return;
-    if (_dialogService.ShowConfirmation($"Удалить контакт \"{contact.Name}\"?", "Удаление"))
-    {
-        _context.Contacts.Remove(contact);
-        _context.SaveChanges();
-        _dialogService.ShowInfo("Контакт удалён.", "Успех");
-    }
-}
-App.xaml.cs (регистрация DbContext)
+App.xaml.cs (регистрация DI)
 csharp
 services.AddDbContext<PhoneBookDbEvseev2307aContext>(options =>
     options.UseSqlite("Data Source=PhoneBookDB_Evseev_2307a.db"));
 services.AddSingleton<IDialogService, DialogService>();
-services.AddTransient<MainViewModel>();
-services.AddSingleton<MainWindow>(provider =>
-{
-    var window = new MainWindow();
-    window.DataContext = provider.GetRequiredService<MainViewModel>();
-    return window;
-});
+services.AddTransient<ContactEditViewModel>();
+services.AddSingleton<ContactsListViewModel>();
+services.AddSingleton<Func<ContactEditViewModel>>(provider => () => provider.GetRequiredService<ContactEditViewModel>());
+MainWindow.xaml
+xml
+<Grid Margin="10">
+    <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,10">
+        <Button Content="Добавить" Command="{Binding AddCommand}" Margin="0,0,10,0"/>
+        <Button Content="Редактировать" Command="{Binding EditCommand}" Margin="0,0,10,0"/>
+        <Button Content="Удалить" Command="{Binding DeleteCommand}"/>
+    </StackPanel>
+    <DataGrid Grid.Row="1" ItemsSource="{Binding Contacts}" SelectedItem="{Binding SelectedContact}" AutoGenerateColumns="False">
+        <DataGrid.Columns>
+            <DataGridTextColumn Header="Имя" Binding="{Binding Name}" Width="*"/>
+            <DataGridTextColumn Header="Телефон" Binding="{Binding Phone}" Width="*"/>
+        </DataGrid.Columns>
+    </DataGrid>
+</Grid>
